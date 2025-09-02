@@ -174,9 +174,9 @@ Este proyecto está bajo la Licencia MIT. Ver `LICENSE` para más detalles.
 ## Contacto y Soporte
 
 Para preguntas, sugerencias o reportar problemas:
-- 📧 Email: tu-email@ejemplo.com
+- 📧 Email: waltherulloa95@gmail.com
 - 🐛 Issues: [GitHub Issues](link-to-issues)
-- 📱 WhatsApp: +XX XXX XXX XXXX
+- 📱 WhatsApp: 50498394611
 
 ## Agradecimientos
 

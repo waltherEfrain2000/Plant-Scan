@@ -34,30 +34,42 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  
+
+  # App icon and splash screen
+  flutter_launcher_icons: ^0.13.1
+  flutter_svg: ^2.0.9
+  lottie: ^3.0.0
+
   # Camera functionality - REAL CAMERA DEPENDENCIES
   camera: ^0.10.5+9
   image_picker: ^1.0.7
-  
+
   # Image processing for REAL analysis - NEW
   image: ^4.1.7
-  
+
   # Permissions
   permission_handler: ^11.2.0
-  
+
   # HTTP requests for REAL APIs
   http: ^1.2.0
   dio: ^5.4.0
-  
+
   # File handling
   path_provider: ^2.1.2
   path: ^1.8.3
-  
+
   # Database for storing analysis history
   sqflite: ^2.3.0
-  
+
   # JSON handling
   json_annotation: ^4.8.1
+
+# App icon configuration
+flutter_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/images/Logo.png"
 
 dev_dependencies:
   flutter_test:
@@ -84,6 +96,7 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/images/
+    - assets/animations/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

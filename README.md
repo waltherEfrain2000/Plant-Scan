@@ -181,9 +181,5 @@ Para preguntas, sugerencias o reportar problemas:
 ## Agradecimientos
 
 - Comunidad Flutter por las herramientas excepcionales
-- Investigadores en fitopatología del café
-- Agricultores que proporcionaron datos para el entrenamiento del modelo
-
----
-
-**Nota**: Actualmente la app funciona con datos simulados para demostración. Para uso en producción, integra con un modelo de machine learning real entrenado específicamente para plantas de café.
+- Investigadores en fitopatología del café y plantas en general
+- Agricultores que proporcionarán  datos para el entrenamiento del modelo

@@ -5,6 +5,7 @@ class PlantAnalysis {
   final double confidence;
   final String recommendation;
   final DateTime analysisDate;
+  final List<String> sources; // Fuentes de información
 
   PlantAnalysis({
     required this.plantType,
@@ -13,6 +14,7 @@ class PlantAnalysis {
     required this.confidence,
     required this.recommendation,
     required this.analysisDate,
+    this.sources = const [],
   });
 
   factory PlantAnalysis.fromJson(Map<String, dynamic> json) {
@@ -26,6 +28,7 @@ class PlantAnalysis {
       recommendation:
           json['recommendation'] ?? 'Sin recomendaciones disponibles',
       analysisDate: DateTime.now(),
+      sources: List<String>.from(json['sources'] ?? []),
     );
   }
 
@@ -37,6 +40,7 @@ class PlantAnalysis {
       'confidence': confidence,
       'recommendation': recommendation,
       'analysis_date': analysisDate.toIso8601String(),
+      'sources': sources,
     };
   }
 

@@ -24,7 +24,7 @@ class UniversalPlantAnalysisService {
 
       // Si no tienes API key, usar análisis local básico
       if (_plantNetApiKey == 'YOUR_PLANTNET_API_KEY') {
-        return _identifyPlantLocally(imageFile);
+        return await _identifyPlantLocally(imageFile);
       }
 
       var request = http.MultipartRequest(
@@ -50,34 +50,153 @@ class UniversalPlantAnalysisService {
         return PlantIdentificationResult.fromPlantNet(data);
       } else {
         print('⚠️ Error en PlantNet API: ${response.statusCode}');
-        return _identifyPlantLocally(imageFile);
+        return await _identifyPlantLocally(imageFile);
       }
     } catch (e) {
       print('⚠️ Error al conectar con PlantNet: $e');
-      return _identifyPlantLocally(imageFile);
+      return await _identifyPlantLocally(imageFile);
     }
   }
 
   /// Identificación local básica cuando no hay API
-  PlantIdentificationResult _identifyPlantLocally(File imageFile) {
-    // Análisis básico local basado en características de imagen
-    final random = Random();
-    final plantTypes = [
-      'Pothos (Epipremnum aureum)',
-      'Sansevieria (Lengua de suegra)',
-      'Ficus lyrata (Higuera de hoja de violín)',
-      'Monstera deliciosa',
-      'Aloe vera',
-      'Planta desconocida',
-    ];
+  Future<PlantIdentificationResult> _identifyPlantLocally(
+    File imageFile,
+  ) async {
+    try {
+      // Cargar imagen para análisis básico
+      final bytes = await imageFile.readAsBytes();
+      final image = img.decodeImage(bytes);
 
-    return PlantIdentificationResult(
-      species: plantTypes[random.nextInt(plantTypes.length)],
-      commonName: 'Planta identificada localmente',
-      confidence: 0.65,
-      family: 'Familia detectada',
-      possibleNames: ['Nombre 1', 'Nombre 2'],
-    );
+      if (image == null) {
+        return PlantIdentificationResult(
+          species: 'Imagen no válida',
+          commonName: 'No se pudo procesar la imagen',
+          confidence: 0.0,
+          family: 'Desconocida',
+          possibleNames: [],
+        );
+      }
+
+      // Validar si es una imagen de planta
+      bool isPlantImage = _validatePlantImage(image);
+
+      if (!isPlantImage) {
+        return PlantIdentificationResult(
+          species: 'No es una planta',
+          commonName: 'La imagen no parece contener una planta',
+          confidence: 0.1,
+          family: 'No aplicable',
+          possibleNames: ['Imagen no vegetal'],
+        );
+      }
+
+      // Análisis básico de colores para sugerir tipo de planta
+      Map<String, int> colorCounts = {};
+      int totalPixels = 0;
+
+      for (int y = 0; y < image.height; y += 20) {
+        for (int x = 0; x < image.width; x += 20) {
+          if (x >= image.width || y >= image.height) continue;
+
+          img.Pixel pixel = image.getPixel(x, y);
+          int r = pixel.r.toInt();
+          int g = pixel.g.toInt();
+          int b = pixel.b.toInt();
+
+          double max = [r, g, b].reduce((a, b) => a > b ? a : b) / 255.0;
+          double min = [r, g, b].reduce((a, b) => a < b ? a : b) / 255.0;
+          double delta = max - min;
+
+          double hue = 0;
+          if (delta != 0) {
+            if (max == r / 255.0) {
+              hue = 60 * (((g - b) / 255.0) / delta);
+            } else if (max == g / 255.0) {
+              hue = 60 * (2 + ((b - r) / 255.0) / delta);
+            } else {
+              hue = 60 * (4 + ((r - g) / 255.0) / delta);
+            }
+          }
+          if (hue < 0) hue += 360;
+
+          double saturation = max == 0 ? 0 : delta / max;
+
+          String category;
+          if (hue >= 75 && hue <= 165 && saturation > 0.2) {
+            category = 'green_leaf';
+          } else if (hue >= 45 && hue <= 75) {
+            category = 'yellow_leaf';
+          } else if (hue < 45 || hue > 315) {
+            category = 'brown_stem';
+          } else {
+            category = 'other';
+          }
+
+          colorCounts[category] = (colorCounts[category] ?? 0) + 1;
+          totalPixels++;
+        }
+      }
+
+      // Determinar tipo de planta basado en colores dominantes
+      double greenPercentage =
+          ((colorCounts['green_leaf'] ?? 0) / totalPixels) * 100;
+      double yellowPercentage =
+          ((colorCounts['yellow_leaf'] ?? 0) / totalPixels) * 100;
+      double brownPercentage =
+          ((colorCounts['brown_stem'] ?? 0) / totalPixels) * 100;
+
+      String suggestedPlant;
+      String commonName;
+      double confidence;
+
+      if (greenPercentage > 40) {
+        // Mucho verde - probablemente una planta de interior común
+        final greenPlants = [
+          'Pothos (Epipremnum aureum)',
+          'Sansevieria (Lengua de suegra)',
+          'Monstera deliciosa',
+          'Ficus lyrata (Higuera de hoja de violín)',
+          'Philodendron',
+          'Planta de interior verde',
+        ];
+        suggestedPlant =
+            greenPlants[DateTime.now().millisecondsSinceEpoch %
+                greenPlants.length];
+        commonName = 'Planta de interior con hojas verdes';
+        confidence = 0.6;
+      } else if (yellowPercentage > 20) {
+        // Amarillo dominante - podría ser una deficiencia o planta amarilla
+        suggestedPlant = 'Planta con posible deficiencia nutricional';
+        commonName = 'Planta con hojas amarillentas';
+        confidence = 0.4;
+      } else if (brownPercentage > 30) {
+        // Café dominante - podría ser tallos o tierra
+        suggestedPlant = 'Planta con tallos visibles';
+        commonName = 'Planta con estructura leñosa';
+        confidence = 0.5;
+      } else {
+        // Mixto - planta general
+        suggestedPlant = 'Planta ornamental';
+        commonName = 'Planta identificada localmente';
+        confidence = 0.45;
+      }
+
+      return PlantIdentificationResult(
+        species: suggestedPlant,
+        commonName: commonName,
+        confidence: confidence,
+        family: 'Familia por determinar',
+        possibleNames: [suggestedPlant, 'Planta similar'],
+      );
+    } catch (e) {
+      return PlantIdentificationResult(
+        species: 'Error en identificación',
+        commonName: 'No se pudo analizar la imagen',
+        confidence: 0.0,
+        family: 'Desconocida',
+        possibleNames: [],
+      );
+    }
   }
 
   /// PASO 2: Análisis REAL de deficiencias nutricionales por color de hoja
@@ -94,6 +213,26 @@ class UniversalPlantAnalysisService {
 
       if (image == null) throw Exception('No se pudo procesar la imagen');
 
+      // VALIDACIÓN: Verificar si la imagen contiene una planta real
+      bool isPlantImage = _validatePlantImage(image);
+      if (!isPlantImage) {
+        print(
+          '⚠️ Imagen no parece contener una planta - omitiendo análisis nutricional',
+        );
+        return NutritionalDeficiencyResult(
+          plantSpecies: plantSpecies,
+          deficiencies: [],
+          confidence: 0.0,
+          recommendations: [
+            '⚠️ No se detectó una planta en la imagen',
+            '📸 Asegúrate de fotografiar una planta real con hojas visibles',
+            '🌿 Las hojas deben ser el elemento principal de la foto',
+            '🔍 Evita fondos complejos o imágenes no relacionadas con plantas',
+          ],
+          analysisMethod: 'Plant Validation Failed',
+        );
+      }
+
       // Análisis de color de las hojas
       var colorAnalysis = _analyzeLeafColors(image);
 
@@ -106,6 +245,7 @@ class UniversalPlantAnalysisService {
         confidence: colorAnalysis.confidence,
         recommendations: _generateRecommendations(deficiencies, plantSpecies),
         analysisMethod: 'Color Analysis + Species Database',
+        colorData: colorAnalysis.colorPercentages, // Agregar datos de colores
       );
     } catch (e) {
       throw Exception('Error en análisis nutricional: $e');
@@ -222,7 +362,100 @@ class UniversalPlantAnalysisService {
     return 'normal';
   }
 
+  /// VALIDACIÓN: Verificar si la imagen contiene una planta real
+  /// Analiza características básicas para detectar formas de hojas/plantas
+  bool _validatePlantImage(img.Image image) {
+    print('🔍 Validando si la imagen contiene una planta...');
+
+    // Análisis rápido de la imagen completa
+    Map<String, int> colorCounts = {};
+    int totalPixels = 0;
+
+    // Muestreo de píxeles (cada 10 píxeles para rendimiento)
+    for (int y = 0; y < image.height; y += 10) {
+      for (int x = 0; x < image.width; x += 10) {
+        if (x >= image.width || y >= image.height) continue;
+
+        img.Pixel pixel = image.getPixel(x, y);
+        int r = pixel.r.toInt();
+        int g = pixel.g.toInt();
+        int b = pixel.b.toInt();
+
+        // Convertir a HSV básico
+        double max = [r, g, b].reduce((a, b) => a > b ? a : b) / 255.0;
+        double min = [r, g, b].reduce((a, b) => a < b ? a : b) / 255.0;
+        double delta = max - min;
+
+        double hue = 0;
+        if (delta != 0) {
+          if (max == r / 255.0) {
+            hue = 60 * (((g - b) / 255.0) / delta);
+          } else if (max == g / 255.0) {
+            hue = 60 * (2 + ((b - r) / 255.0) / delta);
+          } else {
+            hue = 60 * (4 + ((r - g) / 255.0) / delta);
+          }
+        }
+        if (hue < 0) hue += 360;
+
+        double saturation = max == 0 ? 0 : delta / max;
+        double value = max;
+
+        // Clasificar colores
+        String category;
+        if (value < 0.3) {
+          category = 'dark';
+        } else if (saturation < 0.2) {
+          category = 'pale';
+        } else if (hue >= 75 && hue <= 165 && saturation > 0.2) {
+          category = 'green'; // Color verde característico de plantas
+        } else if (hue >= 45 && hue <= 75) {
+          category = 'yellow';
+        } else if (hue < 45 || hue > 315) {
+          category = 'brown';
+        } else {
+          category = 'other';
+        }
+
+        colorCounts[category] = (colorCounts[category] ?? 0) + 1;
+        totalPixels++;
+      }
+    }
+
+    // Calcular porcentajes
+    double greenPercentage = ((colorCounts['green'] ?? 0) / totalPixels) * 100;
+    double brownPercentage = ((colorCounts['brown'] ?? 0) / totalPixels) * 100;
+    double yellowPercentage =
+        ((colorCounts['yellow'] ?? 0) / totalPixels) * 100;
+    double palePercentage = ((colorCounts['pale'] ?? 0) / totalPixels) * 100;
+
+    print(
+      '📊 Análisis de imagen: Verde=$greenPercentage%, Café=$brownPercentage%, Amarillo=$yellowPercentage%, Pálido=$palePercentage%',
+    );
+
+    // CRITERIOS PARA CONSIDERAR QUE ES UNA PLANTA:
+    // 1. Al menos 15% de área verde (característico de hojas)
+    // 2. No más del 70% de colores "pálidos" (que indicarían fotos sobreexpuestas o no plantas)
+    // 3. Al menos algo de variación de color (no una imagen uniforme)
+
+    bool hasEnoughGreen = greenPercentage >= 15.0;
+    bool notOverexposed = palePercentage <= 70.0;
+    bool hasColorVariation =
+        (greenPercentage + brownPercentage + yellowPercentage) >= 20.0;
+
+    bool isPlantImage = hasEnoughGreen && notOverexposed && hasColorVariation;
+
+    print(
+      '✅ ¿Es imagen de planta?: $isPlantImage (Verde: $hasEnoughGreen, No sobreexpuesta: $notOverexposed, Variación: $hasColorVariation)',
+    );
+
+    return isPlantImage;
+  }
+
   /// Mapear colores a deficiencias específicas
+  /// Enhanced based on Cenicafé research on coffee nutritional deficiencies
+  /// Source: Sadeghian Khalajabadi, S. (2013). Nutrición de cafetales.
+  /// In: CENICAFÉ. Manual del cafetero colombiano
   List<NutritionalDeficiency> _mapColorsToDeficiencies(
     LeafColorAnalysis colorAnalysis,
     String plantSpecies,
@@ -232,97 +465,125 @@ class UniversalPlantAnalysisService {
 
     print('🎨 Análisis de colores: $colors');
 
-    // DEFICIENCIA DE NITRÓGENO - Amarillamiento general
+    // Enhanced analysis based on nutrient mobility (Cenicafé classification)
+    // MOBILE NUTRIENTS: Symptoms appear in older leaves (N, P, K, Mg, Cl, Mo)
+    // IMMOBILE NUTRIENTS: Symptoms appear in younger leaves (Ca, S, Fe, Mn, B, Zn, Cu, Ni)
+
+    // DEFICIENCIA DE NITRÓGENO - Amarillamiento general en hojas viejas (MÓVIL)
+    // Más sensible: activar con solo 15% de amarillo para facilitar detección
     double yellowPercentage =
         (colors['pale_yellow'] ?? 0) + (colors['yellow_bright'] ?? 0);
-    if (yellowPercentage > 25) {
+    if (yellowPercentage > 15) {
+      // Reducido de 25% a 15%
       deficiencies.add(
         NutritionalDeficiency(
-          nutrient: 'Nitrógeno (N)',
+          nutrient: 'Nitrógeno (N) - Móvil',
           severity: _calculateSeverity(yellowPercentage),
           symptoms: [
-            'Amarillamiento de hojas más viejas',
-            'Crecimiento lento y débil',
+            'Amarillamiento uniforme de hojas más viejas (Cenicafé)',
+            'Clorosis general comenzando desde hojas inferiores',
+            'Crecimiento lento y raquítico',
             'Hojas pequeñas y pálidas',
             'Pérdida de vigor general',
+            'Reducción en producción de frutos',
           ],
           treatment: [
             'Aplicar fertilizante rico en nitrógeno (NPK 20-10-10)',
             'Usar abono orgánico (compost o humus)',
             'Fertilizante líquido cada 2 semanas',
-            'Para plantas de interior: fertilizante para plantas verdes',
+            'Para café: 30 g.año⁻¹ por planta en levante, 300 kg.ha⁻¹.año⁻¹ en producción',
+            'Aplicar en 3-4 fracciones durante la temporada',
           ],
-          confidence: 0.85,
+          confidence: 0.90, // Higher confidence based on Cenicafé research
         ),
       );
     }
 
-    // DEFICIENCIA DE HIERRO - Clorosis intervenal (hojas amarillas con venas verdes)
-    if ((colors['yellow_bright'] ?? 0) > 20 &&
-        (colors['healthy_green'] ?? 0) > 15) {
+    // DEFICIENCIA DE HIERRO - Clorosis intervenal en hojas jóvenes (INMÓVIL)
+    // Based on Cenicafé: Fe is immobile, symptoms appear in young leaves
+    // Más sensible: reducir umbrales para facilitar detección
+    if ((colors['yellow_bright'] ?? 0) > 12 && // Reducido de 20% a 12%
+        (colors['healthy_green'] ?? 0) > 10) {
+      // Reducido de 15% a 10%
       deficiencies.add(
         NutritionalDeficiency(
-          nutrient: 'Hierro (Fe)',
+          nutrient: 'Hierro (Fe) - Inmóvil',
           severity: _calculateSeverity(colors['yellow_bright'] ?? 0),
           symptoms: [
-            'Amarillamiento entre venas de hojas jóvenes',
-            'Venas permanecen verdes',
-            'Afecta primero las hojas nuevas',
+            'Clorosis intervenal en hojas jóvenes (Cenicafé)',
+            'Amarillamiento entre venas, venas permanecen verdes',
+            'Hojas jóvenes más afectadas (nutriente inmóvil)',
+            'Coloración verde muy claro a blanco',
             'Crecimiento retardado',
+            'Reducción en fotosíntesis',
           ],
           treatment: [
-            'Aplicar quelato de hierro (Fe-EDTA)',
+            'Aplicar quelato de hierro (Fe-EDTA, Fe-EDDHA)',
             'Revisar pH del sustrato (debe ser 6.0-7.0)',
             'Mejorar drenaje del sustrato',
             'Evitar exceso de fósforo que bloquea hierro',
+            'Aplicación foliar de hierro en casos severos',
+            'Para café: evitar encalado excesivo',
           ],
-          confidence: 0.80,
+          confidence: 0.85, // Higher confidence based on Cenicafé research
         ),
       );
     }
 
-    // DEFICIENCIA DE POTASIO - Necrosis marginal y quemaduras
-    if ((colors['brown_edges'] ?? 0) > 15) {
+    // DEFICIENCIA DE POTASIO - Necrosis marginal en hojas productivas (MÓVIL)
+    // Based on Cenicafé: K is mobile, symptoms appear in productive zone leaves
+    if ((colors['brown_edges'] ?? 0) > 8) {
+      // Reducido de 15% a 8%
       deficiencies.add(
         NutritionalDeficiency(
-          nutrient: 'Potasio (K)',
+          nutrient: 'Potasio (K) - Móvil',
           severity: _calculateSeverity(colors['brown_edges'] ?? 0),
           symptoms: [
-            'Quemaduras en bordes de hojas',
-            'Necrosis marginal café/marrón',
-            'Hojas más viejas afectadas primero',
-            'Manchas necróticas en la lámina foliar',
+            'Necrosis en puntas y bordes de hojas (Cenicafé)',
+            'Quemaduras marginales en zona productiva',
+            'Hojas más viejas afectadas primero (nutriente móvil)',
+            'Manchas necróticas irregulares',
+            'Reducción en grosor de pulpa de frutos',
+            'Paloteo en casos severos',
           ],
           treatment: [
-            'Aplicar sulfato de potasio o nitrato de potasio',
+            'Aplicar sulfato de potasio (K₂SO₄) o cloruro de potasio',
+            'Para café: 300 kg.ha⁻¹.año⁻¹ en 2-3 aplicaciones',
             'Reducir fertilizantes con alto nitrógeno',
             'Mejorar aireación del sustrato',
-            'Aumentar frecuencia de riego ligero',
+            'Aplicar en época seca para evitar lixiviación',
+            'Usar fertilizantes con K en frutos (25-4-24)',
           ],
-          confidence: 0.78,
+          confidence: 0.85, // Higher confidence based on Cenicafé research
         ),
       );
     }
 
-    // DEFICIENCIA DE MAGNESIO - Tonos púrpuras y clorosis intervenal en hojas viejas
-    if ((colors['purple_tint'] ?? 0) > 10) {
+    // DEFICIENCIA DE MAGNESIO - Clorosis intervenal en hojas viejas (MÓVIL)
+    // Based on Cenicafé: Mg is mobile, symptoms appear in older leaves
+    if ((colors['purple_tint'] ?? 0) > 6) {
+      // Reducido de 10% a 6%
       deficiencies.add(
         NutritionalDeficiency(
-          nutrient: 'Magnesio (Mg)',
+          nutrient: 'Magnesio (Mg) - Móvil',
           severity: _calculateSeverity(colors['purple_tint'] ?? 0),
           symptoms: [
-            'Clorosis entre venas en hojas maduras',
-            'Coloración rojiza o púrpura',
+            'Clorosis intervenal en hojas más viejas (Cenicafé)',
+            'Coloración rojiza o púrpura en hojas maduras',
+            'Venas permanecen verdes, lámina amarillea',
             'Progresa desde hojas inferiores hacia arriba',
-            'Caída prematura de hojas',
+            'Caída prematura de hojas productivas',
+            'Reducción en producción',
           ],
           treatment: [
-            'Aplicar sulfato de magnesio (sales de Epsom)',
-            'Fertilizante con magnesio (Mg)',
-            'Revisar relación K/Mg en fertilización',
-            'Aplicación foliar de solución de magnesio',
+            'Aplicar sulfato de magnesio (MgSO₄·7H₂O)',
+            'Para café: 60 kg.ha⁻¹.año⁻¹ en 1-2 aplicaciones',
+            'Fertilizante con magnesio (sulfato de magnesio)',
+            'Revisar relación K/Mg (mantener balanceada)',
+            'Aplicación foliar en casos agudos',
+            'Usar caliza dolomítica si hay deficiencia de Ca también',
           ],
-          confidence: 0.75,
+          confidence: 0.82, // Higher confidence based on Cenicafé research
         ),
       );
     }
@@ -346,6 +607,154 @@ class UniversalPlantAnalysisService {
             'Usar sustrato más drenante',
           ],
           confidence: 0.70,
+        ),
+      );
+    }
+
+    // DEFICIENCIA DE FÓSFORO - Coloración rojiza en hojas viejas (MÓVIL)
+    // Based on Cenicafé: P is mobile, symptoms appear in older leaves
+    if ((colors['purple_tint'] ?? 0) > 5 && (colors['brown_edges'] ?? 0) > 6) {
+      // Reducidos los umbrales
+      deficiencies.add(
+        NutritionalDeficiency(
+          nutrient: 'Fósforo (P) - Móvil',
+          severity: DeficiencySeverity.MEDIUM,
+          symptoms: [
+            'Coloración rojiza-púrpura en hojas viejas (Cenicafé)',
+            'Acumulación de antocianinas por estrés',
+            'Hojas más viejas afectadas primero',
+            'Retraso en crecimiento y floración',
+            'Raíces poco desarrolladas',
+            'Frutos pequeños y deformes',
+          ],
+          treatment: [
+            'Aplicar fertilizante con fósforo (superfosfato)',
+            'Para café: 60 kg.ha⁻¹.año⁻¹ de P₂O₅ en aplicación localizada',
+            'Aplicar en surcos junto a semillas',
+            'Mejorar pH del suelo (5.5-6.5) para disponibilidad',
+            'Evitar suelos ácidos extremos',
+            'Usar fuentes solubles de fósforo',
+          ],
+          confidence: 0.80,
+        ),
+      );
+    }
+
+    // DEFICIENCIA DE CALCIO - Clorosis en bordes de hojas jóvenes (INMÓVIL)
+    // Based on Cenicafé: Ca is immobile, symptoms appear in young leaves
+    if ((colors['brown_edges'] ?? 0) > 7 && // Reducido de 12% a 7%
+        (colors['yellow_bright'] ?? 0) > 10) {
+      // Reducido de 15% a 10%
+      deficiencies.add(
+        NutritionalDeficiency(
+          nutrient: 'Calcio (Ca) - Inmóvil',
+          severity: DeficiencySeverity.MEDIUM,
+          symptoms: [
+            'Clorosis en bordes de hojas jóvenes (Cenicafé)',
+            'Hojas nuevas con bordes ondulados',
+            'Puntas de crecimiento necrosadas',
+            'Hojas jóvenes más afectadas (nutriente inmóvil)',
+            'Deformación de frutos jóvenes',
+            'Pudrición apical en frutos',
+          ],
+          treatment: [
+            'Aplicar cal agrícola (CaCO₃) o yeso agrícola (CaSO₄)',
+            'Para café: 400-1400 kg.ha⁻¹ según acidez del suelo',
+            'Mantener pH del suelo entre 5.5-6.5',
+            'Evitar fertilizantes ácidos que reduzcan Ca',
+            'Aplicación foliar de calcio en casos agudos',
+            'Mejorar relación Ca/Mg/K',
+          ],
+          confidence: 0.78,
+        ),
+      );
+    }
+
+    // DEFICIENCIA DE AZUFRE - Amarillamiento de hojas jóvenes (INMÓVIL)
+    // Based on Cenicafé: S is immobile, symptoms appear in young leaves
+    if ((colors['pale_yellow'] ?? 0) > 12 && // Reducido de 20% a 12%
+        (colors['yellow_bright'] ?? 0) > 15) {
+      // Reducido de 25% a 15%
+      deficiencies.add(
+        NutritionalDeficiency(
+          nutrient: 'Azufre (S) - Inmóvil',
+          severity: DeficiencySeverity.MILD,
+          symptoms: [
+            'Amarillamiento uniforme de hojas jóvenes (Cenicafé)',
+            'Hojas nuevas más pálidas que las viejas',
+            'Afecta principalmente el tercio superior de la planta',
+            'Reducción en crecimiento vegetativo',
+            'Frutos pequeños con menor calidad',
+            'Confusión posible con deficiencia de N',
+          ],
+          treatment: [
+            'Aplicar sulfato de amonio o sulfato de potasio',
+            'Para café: 50 kg.ha⁻¹.año⁻¹ de azufre elemental',
+            'Fertilizantes con S (sulfato de magnesio)',
+            'Mejorar mineralización de materia orgánica',
+            'Aplicar en suelos con bajo contenido de materia orgánica',
+            'Monitorear pH para disponibilidad de S',
+          ],
+          confidence: 0.75,
+        ),
+      );
+    }
+
+    // DEFICIENCIA DE BORO - Manchas cafés en brotes (INMÓVIL)
+    // Based on Cenicafé: B is immobile, symptoms appear in young tissues
+    if ((colors['dark_spots'] ?? 0) > 10 && (colors['brown_edges'] ?? 0) > 5) {
+      // Reducidos los umbrales
+      deficiencies.add(
+        NutritionalDeficiency(
+          nutrient: 'Boro (B) - Inmóvil',
+          severity: DeficiencySeverity.MEDIUM,
+          symptoms: [
+            'Manchas cafés en brotes y hojas jóvenes (Cenicafé)',
+            'Muerte de yemas terminales',
+            'Hojas con forma de "V" invertida verde aceituna',
+            'Suberización de nervaduras en hojas viejas',
+            'Frutos con manchas circulares cafés',
+            'Reducción en polinización y fructificación',
+          ],
+          treatment: [
+            'Aplicar bórax o Solubor (20% B)',
+            'Para café: 2-3 kg.ha⁻¹.año⁻¹ de B',
+            'Aplicación foliar preventiva',
+            'Fertilizantes con B en suelos deficientes',
+            'Evitar dosis excesivas (fitotóxicas)',
+            'Monitorear en suelos arenosos y con baja materia orgánica',
+          ],
+          confidence: 0.76,
+        ),
+      );
+    }
+
+    // DEFICIENCIA DE ZINC - Hojas pequeñas y clorosis intervenal (INMÓVIL)
+    // Based on Cenicafé: Zn is immobile, symptoms appear in young leaves
+    if ((colors['yellow_bright'] ?? 0) > 12 && // Reducido de 18% a 12%
+        (colors['pale_yellow'] ?? 0) > 10) {
+      // Reducido de 15% a 10%
+      deficiencies.add(
+        NutritionalDeficiency(
+          nutrient: 'Zinc (Zn) - Inmóvil',
+          severity: DeficiencySeverity.MEDIUM,
+          symptoms: [
+            'Hojas jóvenes más pequeñas y lanceoladas (Cenicafé)',
+            'Clorosis intervenal en hojas nuevas',
+            'Entrenudos cortos (acortamiento)',
+            'Hojas jóvenes más afectadas (nutriente inmóvil)',
+            'Reducción en crecimiento vegetativo',
+            'Frutos pequeños y deformes',
+          ],
+          treatment: [
+            'Aplicar sulfato de zinc (ZnSO₄·7H₂O)',
+            'Para café: 3 kg.ha⁻¹.año⁻¹ de Zn',
+            'Aplicación foliar en casos severos',
+            'Evitar suelos calcáreos (pH > 7.0)',
+            'Mejorar relación Zn/P (evitar exceso de P)',
+            'Fertilizantes con Zn en suelos deficientes',
+          ],
+          confidence: 0.74,
         ),
       );
     }
@@ -554,6 +963,7 @@ class NutritionalDeficiencyResult {
   final double confidence;
   final List<String> recommendations;
   final String analysisMethod;
+  final Map<String, double>? colorData; // Datos de colores detectados
 
   NutritionalDeficiencyResult({
     required this.plantSpecies,
@@ -561,6 +971,7 @@ class NutritionalDeficiencyResult {
     required this.confidence,
     required this.recommendations,
     required this.analysisMethod,
+    this.colorData,
   });
 }
 

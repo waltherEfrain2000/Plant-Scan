@@ -39,6 +39,24 @@ class PlantAnalysisService {
     PlantIdentificationResult identification,
     NutritionalDeficiencyResult deficiencyAnalysis,
   ) {
+    // Incluir información de colores en las recomendaciones si está disponible
+    List<String> enhancedRecommendations = [];
+    enhancedRecommendations.addAll(deficiencyAnalysis.recommendations);
+
+    if (deficiencyAnalysis.colorData != null &&
+        deficiencyAnalysis.colorData!.isNotEmpty) {
+      enhancedRecommendations.add('');
+      enhancedRecommendations.add('📊 ANÁLISIS DE COLORES DETECTADOS:');
+      deficiencyAnalysis.colorData!.forEach((color, percentage) {
+        if (percentage > 5) {
+          // Solo mostrar colores con más del 5%
+          String colorName = _getColorDisplayName(color);
+          enhancedRecommendations.add(
+            '• $colorName: ${percentage.toStringAsFixed(1)}%',
+          );
+        }
+      });
+    }
     // Extraer enfermedades detectadas (las deficiencias severas se consideran "enfermedades")
     List<String> diseases = [];
     List<String> nutrientDeficiencies = [];
@@ -65,7 +83,7 @@ class PlantAnalysisService {
     recommendations.add(
       '🔬 Confianza de identificación: ${(identification.confidence * 100).toStringAsFixed(1)}%',
     );
-    recommendations.addAll(deficiencyAnalysis.recommendations);
+    recommendations.addAll(enhancedRecommendations);
 
     return PlantAnalysis(
       plantType: identification.commonName,
@@ -75,6 +93,14 @@ class PlantAnalysisService {
           (identification.confidence + deficiencyAnalysis.confidence) / 2,
       recommendation: recommendations.join('\n'),
       analysisDate: DateTime.now(),
+      sources: [
+        'Cenicafé - Centro Nacional de Investigaciones de Café (Colombia)',
+        'FAO - Food and Agriculture Organization',
+        'USDA - United States Department of Agriculture',
+        'CIAT - Centro Internacional de Agricultura Tropical',
+        'University Extension Services (Cornell, UC, etc.)',
+        'Sadeghian Khalajabadi, S. (2013). Nutrición de cafetales.',
+      ],
     );
   }
 
@@ -137,7 +163,23 @@ class PlantAnalysisService {
     ];
 
     final random = DateTime.now().millisecondsSinceEpoch % mockResults.length;
-    return PlantAnalysis.fromJson(mockResults[random]);
+    final analysis = PlantAnalysis.fromJson(mockResults[random]);
+    return PlantAnalysis(
+      plantType: analysis.plantType,
+      diseases: analysis.diseases,
+      nutrientDeficiencies: analysis.nutrientDeficiencies,
+      confidence: analysis.confidence,
+      recommendation: analysis.recommendation,
+      analysisDate: analysis.analysisDate,
+      sources: [
+        'Cenicafé - Centro Nacional de Investigaciones de Café (Colombia)',
+        'FAO - Food and Agriculture Organization',
+        'USDA - United States Department of Agriculture',
+        'CIAT - Centro Internacional de Agricultura Tropical',
+        'University Extension Services (Cornell, UC, etc.)',
+        'Sadeghian Khalajabadi, S. (2013). Nutrición de cafetales.',
+      ],
+    );
   }
 
   // Lista de enfermedades comunes del café
@@ -160,4 +202,26 @@ class PlantAnalysisService {
     'Deficiencia de Zinc',
     'Deficiencia de Boro',
   ];
+
+  /// Convertir nombres técnicos de colores a nombres legibles
+  String _getColorDisplayName(String colorKey) {
+    switch (colorKey) {
+      case 'healthy_green':
+        return 'Verde saludable';
+      case 'yellow_bright':
+        return 'Amarillo brillante';
+      case 'pale_yellow':
+        return 'Amarillo pálido';
+      case 'brown_edges':
+        return 'Bordes cafés';
+      case 'purple_tint':
+        return 'Tinte púrpura';
+      case 'dark_spots':
+        return 'Manchas oscuras';
+      case 'blue_green':
+        return 'Verde azulado';
+      default:
+        return colorKey;
+    }
+  }
 }

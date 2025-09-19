@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
+import 'dart:typed_data';
 import '../models/plant_analysis.dart';
 import '../services/plant_analysis_service.dart';
+import '../services/pdf_generator_service.dart';
 
 class AnalysisScreen extends StatefulWidget {
   const AnalysisScreen({super.key});
@@ -89,8 +91,18 @@ class _AnalysisScreenState extends State<AnalysisScreen>
       appBar: AppBar(
         title: const Text('Análisis de Planta'),
         actions: [
-          if (_analysis != null)
-            IconButton(onPressed: _shareResults, icon: const Icon(Icons.share)),
+          if (_analysis != null) ...[
+            IconButton(
+              onPressed: _downloadPdf,
+              icon: const Icon(Icons.download),
+              tooltip: 'Descargar PDF',
+            ),
+            IconButton(
+              onPressed: _shareResults,
+              icon: const Icon(Icons.share),
+              tooltip: 'Compartir resultados',
+            ),
+          ],
         ],
       ),
       body: SingleChildScrollView(
@@ -206,7 +218,7 @@ class _AnalysisScreenState extends State<AnalysisScreen>
             ),
             const SizedBox(height: 12),
             Text(
-              'Detectando enfermedades y deficiencias nutricionales',
+              'Verificando imagen y detectando enfermedades y deficiencias nutricionales',
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
@@ -290,6 +302,12 @@ class _AnalysisScreenState extends State<AnalysisScreen>
         _buildRecommendationsCard(),
         const SizedBox(height: 16),
 
+        // Sources Card
+        if (_analysis!.sources.isNotEmpty) ...[
+          _buildSourcesCard(),
+          const SizedBox(height: 16),
+        ],
+
         // Action Buttons
         _buildActionButtons(),
       ],
@@ -370,29 +388,67 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   }
 
   Widget _buildPlantTypeCard() {
+    // Determinar el ícono basado en el tipo de planta identificado
+    IconData plantIcon = Icons.local_florist;
+    Color iconColor = Colors.green.shade600;
+
+    String plantType = _analysis!.plantType.toLowerCase();
+    if (plantType.contains('no es una planta') ||
+        plantType.contains('no parece')) {
+      plantIcon = Icons.warning;
+      iconColor = Colors.orange.shade600;
+    } else if (plantType.contains('error') || plantType.contains('no válida')) {
+      plantIcon = Icons.error;
+      iconColor = Colors.red.shade600;
+    } else if (plantType.contains('desconocida')) {
+      plantIcon = Icons.help;
+      iconColor = Colors.grey.shade600;
+    }
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Row(
           children: [
-            Icon(Icons.local_florist, color: Colors.green.shade600, size: 24),
+            Icon(plantIcon, color: iconColor, size: 24),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Tipo de planta',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-                ),
-                Text(
-                  _analysis!.plantType,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Tipo de planta',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey.shade600,
+                    ),
                   ),
-                ),
-              ],
+                  Text(
+                    _analysis!.plantType,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color:
+                          plantType.contains('no es una planta') ||
+                                  plantType.contains('no parece')
+                              ? Colors.orange.shade800
+                              : plantType.contains('error') ||
+                                  plantType.contains('no válida')
+                              ? Colors.red.shade800
+                              : null,
+                    ),
+                  ),
+                  if (_analysis!.confidence < 0.5)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4.0),
+                      child: Text(
+                        'Confianza baja - considera tomar otra foto',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.orange.shade600,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ],
         ),
@@ -453,6 +509,63 @@ class _AnalysisScreenState extends State<AnalysisScreen>
   }
 
   Widget _buildNutrientDeficienciesCard() {
+    // Si no hay deficiencias pero tampoco es una planta válida, mostrar mensaje especial
+    if (_analysis!.nutrientDeficiencies.isEmpty &&
+        (_analysis!.plantType.toLowerCase().contains('no es una planta') ||
+            _analysis!.plantType.toLowerCase().contains('no parece'))) {
+      return Card(
+        color: Colors.grey.shade50,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.info, color: Colors.grey.shade600, size: 24),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Análisis Nutricional',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12.0),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.camera_alt,
+                      color: Colors.blue.shade600,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Para analizar deficiencias nutricionales, toma una foto clara de las hojas de una planta real.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.blue.shade800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Card(
       color: Colors.orange.shade50,
       child: Padding(
@@ -474,30 +587,58 @@ class _AnalysisScreenState extends State<AnalysisScreen>
               ],
             ),
             const SizedBox(height: 12),
-            ..._analysis!.nutrientDeficiencies.map(
-              (deficiency) => Padding(
-                padding: const EdgeInsets.only(bottom: 8.0),
+            if (_analysis!.nutrientDeficiencies.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(12.0),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
                 child: Row(
                   children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade400,
-                        shape: BoxShape.circle,
-                      ),
+                    Icon(
+                      Icons.check_circle,
+                      color: Colors.green.shade600,
+                      size: 20,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        deficiency,
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        'No se detectaron deficiencias nutricionales significativas.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.green.shade800,
+                        ),
                       ),
                     ),
                   ],
                 ),
+              )
+            else
+              ..._analysis!.nutrientDeficiencies.map(
+                (deficiency) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade400,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          deficiency,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -540,6 +681,73 @@ class _AnalysisScreenState extends State<AnalysisScreen>
     );
   }
 
+  Widget _buildSourcesCard() {
+    return Card(
+      color: Colors.purple.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.library_books,
+                  color: Colors.purple.shade600,
+                  size: 24,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Fuentes de Información',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.purple.shade800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ..._analysis!.sources.map(
+              (source) => Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: Colors.purple.shade400,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        source,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.purple.shade700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Información basada en investigación científica y servicios de extensión agrícola.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Colors.grey.shade600,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildActionButtons() {
     return Row(
       children: [
@@ -572,6 +780,125 @@ class _AnalysisScreenState extends State<AnalysisScreen>
         ),
       ],
     );
+  }
+
+  Future<void> _downloadPdf() async {
+    if (_analysis == null) return;
+
+    try {
+      // Mostrar indicador de carga
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Generando PDF...'),
+          backgroundColor: Colors.blue,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      // Preparar la imagen si está disponible
+      Uint8List? imageBytes;
+      if (_imageFile != null) {
+        imageBytes = await _imageFile!.readAsBytes();
+      }
+
+      // Extraer datos de colores de las recomendaciones (si están disponibles)
+      Map<String, double>? colorData;
+      final recommendations = _analysis!.recommendation;
+      if (recommendations.contains('ANÁLISIS DE COLORES DETECTADOS:')) {
+        colorData = _extractColorDataFromRecommendations(recommendations);
+      }
+
+      // Generar el PDF
+      final pdfPath = await PdfGeneratorService.generateAnalysisReport(
+        _analysis!,
+        imageBytes: imageBytes,
+        colorData: colorData,
+      );
+
+      // Compartir el PDF generado
+      await PdfGeneratorService.sharePdf(pdfPath);
+
+      // Mostrar mensaje de éxito
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('PDF generado y listo para compartir'),
+          backgroundColor: Colors.green,
+          action: SnackBarAction(
+            label: 'Abrir',
+            textColor: Colors.white,
+            onPressed: () => PdfGeneratorService.sharePdf(pdfPath),
+          ),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al generar PDF: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Map<String, double> _extractColorDataFromRecommendations(
+    String recommendations,
+  ) {
+    final colorData = <String, double>{};
+    final lines = recommendations.split('\n');
+
+    bool inColorSection = false;
+    for (final line in lines) {
+      if (line.contains('ANÁLISIS DE COLORES DETECTADOS:')) {
+        inColorSection = true;
+        continue;
+      }
+
+      if (inColorSection && line.trim().isNotEmpty && line.contains('•')) {
+        // Extraer datos de colores del formato "• Verde saludable: 45.2%"
+        final parts = line.split('•');
+        if (parts.length > 1) {
+          final colorInfo = parts[1].trim();
+          final colonIndex = colorInfo.indexOf(':');
+          if (colonIndex != -1) {
+            final colorName = colorInfo.substring(0, colonIndex).trim();
+            final percentageStr = colorInfo
+                .substring(colonIndex + 1)
+                .trim()
+                .replaceAll('%', '');
+            final percentage = double.tryParse(percentageStr);
+
+            if (percentage != null) {
+              // Convertir nombre legible a clave técnica
+              final colorKey = _convertDisplayNameToKey(colorName);
+              colorData[colorKey] = percentage;
+            }
+          }
+        }
+      }
+    }
+
+    return colorData;
+  }
+
+  String _convertDisplayNameToKey(String displayName) {
+    switch (displayName) {
+      case 'Verde saludable':
+        return 'healthy_green';
+      case 'Amarillo brillante':
+        return 'yellow_bright';
+      case 'Amarillo pálido':
+        return 'pale_yellow';
+      case 'Bordes cafés':
+        return 'brown_edges';
+      case 'Tinte púrpura':
+        return 'purple_tint';
+      case 'Manchas oscuras':
+        return 'dark_spots';
+      case 'Verde azulado':
+        return 'blue_green';
+      default:
+        return displayName.toLowerCase().replaceAll(' ', '_');
+    }
   }
 
   void _shareResults() {
